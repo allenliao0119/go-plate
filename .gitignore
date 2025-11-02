@@ -1,0 +1,73 @@
+# Go build outputs
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go dependencies
+vendor/
+go.work
+go.work.sum
+
+# Environment and configuration
+.env
+.env.local
+.env.*.local
+*.env
+.venv/
+venv/
+ENV/
+env/
+
+# IDE and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+logs/
+*.log
+
+# Testing and coverage
+coverage/
+coverage.txt
+coverage.html
+*.cover
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.cache
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Secrets and credentials
+*.pem
+*.key
+*.cert
+*.crt
+credentials.json
+secrets.json
+service-account*.json
+
+# Docker
+docker-compose.override.yml
+.dockerignore.local
