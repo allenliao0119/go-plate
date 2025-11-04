@@ -5,6 +5,16 @@
 **Status**: Draft
 **Input**: User description: "I need to create a system specification document for a restaurant self-pickup ordering platform (similar to online food ordering, but customers pick up their own orders)."
 
+## Clarifications
+
+### Session 2025-11-05
+
+- Q: FR-043 states restaurants can accept orders within 5 minutes, and FR-044 auto-rejects at 10 minutes. What happens between 5-10 minutes? → A: System sends escalating notifications: soft reminder at 5 minutes, urgent reminder at 8 minutes, auto-reject at 10 minutes. Restaurants can accept anytime before 10 minutes.
+- Q: When a customer completes checkout, should the payment be immediately captured or just authorized (with capture happening later)? → A: Authorize at checkout, capture when restaurant accepts - hold funds at checkout, only capture if restaurant accepts within 10 minutes. If rejected/auto-rejected, release authorization immediately (funds available within 24 hours).
+- Q: What are the expected scale parameters for the MVP/initial launch? → A: 50 restaurants, 10000 customers, 100 concurrent
+- Q: Edge cases mention a "5-minute grace period" for cancellations. What is the exact customer cancellation policy? → A: Customers can cancel within 5 minutes with full automatic refund. After 5 minutes but before restaurant accepts, cancellation requires restaurant approval. Once accepted, no cancellations allowed.
+- Q: The edge cases mention that if a customer fails to pick up their order, they "may forfeit order and payment." What is the exact no-show policy? → A: Customer has 15-minute grace period. If not picked up, restaurant must actively mark as no-show to trigger payment capture. Customer forfeits order and full payment goes to restaurant.
+
 ## User Scenarios & Testing *(mandatory)*
 
 <!--
@@ -119,15 +129,15 @@ A platform administrator wants to oversee restaurant applications, handle disput
 
 ### Edge Cases
 
-- What happens when a customer places an order but the restaurant is at capacity for that time slot? (System should prevent booking or show next available slot)
-- What happens when a restaurant goes offline after accepting an order? (System should send alerts to admin and customer, offer refund)
-- What happens when a customer fails to pick up their order within the specified time window? (System should notify both parties, restaurant can mark as no-show, customer may forfeit order)
-- What happens when payment processing fails during checkout? (System should show clear error message, allow retry with different payment method)
-- What happens when a customer tries to cancel an order after it has been confirmed? (System should allow cancellation within a grace period, e.g., 5 minutes, with full refund; after that, require restaurant approval)
-- What happens when a customer has special dietary requirements or allergies? (Customers should be able to add notes/instructions during checkout)
-- What happens when two customers book the same pickup time slot and the restaurant reaches capacity? (System should enforce slot capacity limits and prevent overbooking)
+- What happens when a customer places an order but the restaurant is at capacity for that time slot? (System prevents booking and shows next available slot per FR-062)
+- What happens when a restaurant goes offline after accepting an order? (System should send alerts to admin and customer; admin can facilitate resolution per FR-082)
+- What happens when a customer fails to pick up their order within the specified time window? (Customer has 15-minute grace period; restaurant can mark as no-show after that; customer forfeits order and payment per FR-039 through FR-042)
+- What happens when payment processing fails during checkout? (System shows clear error message and allows retry with different payment method per FR-022)
+- What happens when a customer tries to cancel an order? (Customers can cancel within 5 minutes automatically; after 5 minutes but before restaurant accepts requires approval; no cancellation once accepted per FR-033 through FR-037)
+- What happens when a customer has special dietary requirements or allergies? (Customers can add notes/instructions during checkout per FR-010)
+- What happens when two customers book the same pickup time slot and the restaurant reaches capacity? (System enforces slot capacity limits and prevents overbooking per FR-062)
 - What happens when a restaurant wants to temporarily pause incoming orders? (Restaurant should have a "pause orders" toggle to stop accepting new orders)
-- What happens when a customer disputes a charge after picking up the order? (Admin should have dispute resolution workflow with evidence collection)
+- What happens when a customer disputes a charge after picking up the order? (Admin has dispute resolution workflow with evidence collection per FR-082)
 
 ## Requirements *(mandatory)*
 
@@ -164,76 +174,118 @@ A platform administrator wants to oversee restaurant applications, handle disput
 - **FR-017**: System MUST generate unique order number upon successful order placement
 
 **Payment Processing**
-- **FR-018**: System MUST process payments via credit/debit cards (Visa, Mastercard, American Express)
-- **FR-019**: System MUST process payments via digital wallets (Apple Pay, Google Pay)
-- **FR-020**: System MUST display payment failure reasons and allow customers to retry with different payment method
-- **FR-021**: System MUST provide order confirmation only after successful payment authorization
-- **FR-022**: System MUST securely handle payment information in compliance with PCI DSS standards
+- **FR-018**: System MUST authorize (not capture) payments via credit/debit cards (Visa, Mastercard, American Express) at checkout
+- **FR-019**: System MUST authorize (not capture) payments via digital wallets (Apple Pay, Google Pay) at checkout
+- **FR-020**: System MUST capture authorized payment when restaurant accepts the order within 10 minutes
+- **FR-021**: System MUST automatically release payment authorization if order is rejected by restaurant or auto-rejected after 10 minutes, making funds available to customer within 24 hours
+- **FR-022**: System MUST display payment authorization failure reasons and allow customers to retry with different payment method
+- **FR-023**: System MUST provide order confirmation only after successful payment authorization
+- **FR-024**: System MUST securely handle payment information in compliance with PCI DSS standards
 
 **Order Status and Notifications**
-- **FR-023**: System MUST send order confirmation notification to customer via email immediately after successful payment
-- **FR-024**: System MUST send real-time notifications to restaurant when new order is received
-- **FR-025**: System MUST allow restaurants to accept or reject orders with rejection reason
-- **FR-026**: System MUST send notification to customer when restaurant accepts order
-- **FR-027**: System MUST allow restaurants to update order status through states: confirmed → preparing → ready for pickup → completed
-- **FR-028**: System MUST send notification to customer when order is ready for pickup
-- **FR-029**: System MUST allow customers to track current order status in real-time
-- **FR-030**: System MUST send reminder notification 15 minutes before scheduled pickup time
+- **FR-025**: System MUST send order confirmation notification to customer via email immediately after successful payment authorization
+- **FR-026**: System MUST send real-time notifications to restaurant when new order is received
+- **FR-027**: System MUST allow restaurants to accept or reject orders with rejection reason
+- **FR-028**: System MUST send notification to customer when restaurant accepts order (including confirmation that payment has been captured)
+- **FR-029**: System MUST allow restaurants to update order status through states: confirmed → preparing → ready for pickup → completed
+- **FR-030**: System MUST send notification to customer when order is ready for pickup
+- **FR-031**: System MUST allow customers to track current order status in real-time
+- **FR-032**: System MUST send reminder notification 15 minutes before scheduled pickup time
+
+**Order Cancellation**
+- **FR-033**: System MUST allow customers to cancel orders within 5 minutes of placement with automatic full refund (payment authorization release)
+- **FR-034**: System MUST allow customers to request cancellation after 5 minutes but before restaurant acceptance, requiring restaurant approval
+- **FR-035**: System MUST notify restaurants of cancellation requests that require their approval and allow them to approve or deny within 5 minutes
+- **FR-036**: System MUST automatically deny cancellation requests that are not responded to by restaurant within 5 minutes
+- **FR-037**: System MUST prevent order cancellation once restaurant has accepted the order (status is "confirmed" or later)
+- **FR-038**: System MUST release payment authorization immediately upon successful cancellation
+
+**Order Pickup and No-Show Policy**
+- **FR-039**: System MUST allow customers a 15-minute grace period after scheduled pickup time before order can be marked as no-show
+- **FR-040**: System MUST allow restaurant owners to manually mark orders as "no-show" after the 15-minute grace period has elapsed
+- **FR-041**: System MUST automatically capture the full authorized payment amount when restaurant marks order as no-show, with payment going to the restaurant
+- **FR-042**: System MUST notify customer when order is marked as no-show, explaining that payment has been captured and order is forfeited
+- **FR-043**: System MUST prevent customers from marking an order as "completed" themselves; only restaurants can mark orders completed after verifying pickup
 
 **Restaurant Account Management**
-- **FR-031**: System MUST allow restaurant owners to register with business information (restaurant name, owner name, email, phone, business license number)
-- **FR-032**: System MUST allow restaurant owners to create and manage restaurant profile including name, description, cuisine type, address, phone, and photos
-- **FR-033**: System MUST allow restaurant owners to set operating hours for each day of the week
-- **FR-034**: System MUST allow restaurant owners to mark special closure dates or holiday hours
+- **FR-044**: System MUST allow restaurant owners to register with business information (restaurant name, owner name, email, phone, business license number)
+- **FR-045**: System MUST allow restaurant owners to create and manage restaurant profile including name, description, cuisine type, address, phone, and photos
+- **FR-046**: System MUST allow restaurant owners to set operating hours for each day of the week
+- **FR-047**: System MUST allow restaurant owners to mark special closure dates or holiday hours
 
 **Restaurant Menu Management**
-- **FR-035**: System MUST allow restaurant owners to create menu categories
-- **FR-036**: System MUST allow restaurant owners to create menu items with name, description, price, category, preparation time, and dietary information (vegetarian, vegan, gluten-free, allergens)
-- **FR-037**: System MUST allow restaurant owners to upload photos for menu items
-- **FR-038**: System MUST allow restaurant owners to set item availability (available, sold out, seasonal)
-- **FR-039**: System MUST allow restaurant owners to define customization options for menu items (sizes, add-ons with pricing)
-- **FR-040**: System MUST allow restaurant owners to reorder menu categories and items for display
+- **FR-048**: System MUST allow restaurant owners to create menu categories
+- **FR-049**: System MUST allow restaurant owners to create menu items with name, description, price, category, preparation time, and dietary information (vegetarian, vegan, gluten-free, allergens)
+- **FR-050**: System MUST allow restaurant owners to upload photos for menu items
+- **FR-051**: System MUST allow restaurant owners to set item availability (available, sold out, seasonal)
+- **FR-052**: System MUST allow restaurant owners to define customization options for menu items (sizes, add-ons with pricing)
+- **FR-053**: System MUST allow restaurant owners to reorder menu categories and items for display
 
 **Restaurant Order Management**
-- **FR-041**: System MUST display incoming orders to restaurant owners in real-time
-- **FR-042**: System MUST allow restaurant owners to view complete order details including items, quantities, customizations, customer info, and pickup time
-- **FR-043**: System MUST allow restaurant owners to accept orders within 5 minutes of receipt
-- **FR-044**: System MUST automatically reject orders not accepted within 10 minutes
-- **FR-045**: System MUST allow restaurant owners to mark orders as preparing, ready, and completed
-- **FR-046**: System MUST prevent order status from moving backward (e.g., ready cannot become preparing)
+- **FR-054**: System MUST display incoming orders to restaurant owners in real-time
+- **FR-055**: System MUST allow restaurant owners to view complete order details including items, quantities, customizations, customer info, and pickup time
+- **FR-056**: System MUST allow restaurant owners to accept orders anytime before the 10-minute deadline, with escalating notifications sent at 5 minutes (soft reminder) and 8 minutes (urgent reminder) if not yet accepted
+- **FR-057**: System MUST automatically reject orders and release payment authorization if not accepted within 10 minutes of receipt
+- **FR-058**: System MUST allow restaurant owners to mark orders as preparing, ready, and completed
+- **FR-059**: System MUST prevent order status from moving backward (e.g., ready cannot become preparing)
 
 **Pickup Time Slot Management**
-- **FR-047**: System MUST allow restaurant owners to configure pickup time slot duration (e.g., 15-minute intervals)
-- **FR-048**: System MUST allow restaurant owners to set maximum orders per time slot
-- **FR-049**: System MUST prevent customers from selecting time slots that are at capacity
-- **FR-050**: System MUST calculate earliest available pickup time based on current time plus minimum preparation time
+- **FR-060**: System MUST allow restaurant owners to configure pickup time slot duration (e.g., 15-minute intervals)
+- **FR-061**: System MUST allow restaurant owners to set maximum orders per time slot
+- **FR-062**: System MUST prevent customers from selecting time slots that are at capacity
+- **FR-063**: System MUST calculate earliest available pickup time based on current time plus minimum preparation time
 
 **Reviews and Ratings**
-- **FR-051**: System MUST allow customers to rate orders from 1 to 5 stars after order is marked completed
-- **FR-052**: System MUST allow customers to write text review (optional) with maximum 500 characters
-- **FR-053**: System MUST display restaurant's average rating calculated from all customer ratings
-- **FR-054**: System MUST display recent reviews on restaurant profile page, sorted by most recent first
-- **FR-055**: System MUST prevent customers from rating the same order multiple times
+- **FR-064**: System MUST allow customers to rate orders from 1 to 5 stars after order is marked completed
+- **FR-065**: System MUST allow customers to write text review (optional) with maximum 500 characters
+- **FR-066**: System MUST display restaurant's average rating calculated from all customer ratings
+- **FR-067**: System MUST display recent reviews on restaurant profile page, sorted by most recent first
+- **FR-068**: System MUST prevent customers from rating the same order multiple times
 
 **Order History**
-- **FR-056**: System MUST display customer's complete order history sorted by most recent first
-- **FR-057**: System MUST allow customers to view details of past orders including date, restaurant, items, and total cost
-- **FR-058**: System MUST allow customers to reorder by adding all items from a past order to current cart
+- **FR-069**: System MUST display customer's complete order history sorted by most recent first
+- **FR-070**: System MUST allow customers to view details of past orders including date, restaurant, items, and total cost
+- **FR-071**: System MUST allow customers to reorder by adding all items from a past order to current cart
 
 **Restaurant Analytics and Reporting**
-- **FR-059**: System MUST display total revenue, order count, and average order value for selected time period
-- **FR-060**: System MUST display popular menu items ranked by order frequency
-- **FR-061**: System MUST display order volume by hour and day of week
-- **FR-062**: System MUST allow restaurant owners to export reports in CSV format
+- **FR-072**: System MUST display total revenue, order count, and average order value for selected time period
+- **FR-073**: System MUST display popular menu items ranked by order frequency
+- **FR-074**: System MUST display order volume by hour and day of week
+- **FR-075**: System MUST allow restaurant owners to export reports in CSV format
 
 **Platform Administration**
-- **FR-063**: System MUST allow administrators to review restaurant applications with business details
-- **FR-064**: System MUST allow administrators to approve or reject restaurant applications
-- **FR-065**: System MUST allow administrators to search and view customer and restaurant accounts
-- **FR-066**: System MUST allow administrators to suspend or deactivate accounts
-- **FR-067**: System MUST allow administrators to view platform-wide analytics (total users, restaurants, orders, revenue)
-- **FR-068**: System MUST allow administrators to process refund requests with partial or full refund amounts
-- **FR-069**: System MUST allow administrators to view and respond to customer support disputes
+- **FR-076**: System MUST allow administrators to review restaurant applications with business details
+- **FR-077**: System MUST allow administrators to approve or reject restaurant applications
+- **FR-078**: System MUST allow administrators to search and view customer and restaurant accounts
+- **FR-079**: System MUST allow administrators to suspend or deactivate accounts
+- **FR-080**: System MUST allow administrators to view platform-wide analytics (total users, restaurants, orders, revenue)
+- **FR-081**: System MUST allow administrators to process manual refunds for special cases (payment authorization releases are automatic per FR-021)
+- **FR-082**: System MUST allow administrators to view and respond to customer support disputes
+
+### Non-Functional Requirements
+
+**Scalability and Capacity**
+- **NFR-001**: System MUST support up to 50 restaurants in the MVP/initial launch phase
+- **NFR-002**: System MUST support up to 10,000 registered customers in the MVP/initial launch phase
+- **NFR-003**: System MUST handle up to 100 concurrent users (browsing, ordering, or managing orders) without performance degradation
+- **NFR-004**: System architecture MUST be designed to scale horizontally to support 10x growth (500 restaurants, 100,000 customers, 1,000 concurrent users) in future phases
+
+**Performance**
+- **NFR-005**: Restaurant listing and search results MUST load within 2 seconds under normal load conditions
+- **NFR-006**: Payment authorization requests MUST complete within 5 seconds under normal conditions
+- **NFR-007**: Real-time order notifications MUST be delivered to restaurants within 10 seconds of order placement
+- **NFR-008**: Order status updates MUST be reflected in customer interface within 5 seconds of restaurant status change
+
+**Reliability and Availability**
+- **NFR-009**: System MUST maintain 99.5% uptime during business hours (8 AM to 11 PM local time)
+- **NFR-010**: System MUST handle payment gateway failures gracefully by displaying clear error messages and allowing retry with alternative payment methods
+- **NFR-011**: System MUST persist all order and payment data with automatic backups every 24 hours
+
+**Security**
+- **NFR-012**: System MUST comply with PCI DSS standards for payment card data handling
+- **NFR-013**: System MUST use HTTPS/TLS 1.3 or higher for all client-server communications
+- **NFR-014**: System MUST enforce password complexity requirements (minimum 8 characters, mixed case, numbers, special characters)
+- **NFR-015**: System MUST implement rate limiting on authentication endpoints (maximum 5 failed login attempts per 15 minutes per IP address)
 
 ### Key Entities
 
