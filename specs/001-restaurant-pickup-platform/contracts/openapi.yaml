@@ -1,0 +1,2208 @@
+openapi: 3.0.3
+info:
+  title: Restaurant Self-Pickup Ordering Platform API
+  description: |
+    RESTful API for a restaurant self-pickup ordering platform that allows customers to browse restaurants,
+    place orders online with scheduled pickup times, and receive real-time order status notifications.
+
+    ## Key Features
+    - Customer account management and authentication
+    - Restaurant discovery and menu browsing
+    - Order placement with scheduled pickup times
+    - Payment authorization/capture flow via Stripe
+    - Real-time order status notifications
+    - Restaurant order management and menu administration
+    - Platform administration for restaurant approval and dispute resolution
+
+    ## Authentication
+    All authenticated endpoints require a Bearer token in the Authorization header.
+
+    ## Error Handling
+    All errors follow a consistent format:
+    ```json
+    {
+      "error": {
+        "code": "ERR_CODE",
+        "message": "Human-readable error message",
+        "details": {},
+        "correlation_id": "uuid"
+      }
+    }
+    ```
+
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@restaurantplatform.com
+  license:
+    name: MIT
+
+servers:
+  - url: https://api.restaurantplatform.com/v1
+    description: Production server
+  - url: https://staging-api.restaurantplatform.com/v1
+    description: Staging server
+  - url: http://localhost:8080/v1
+    description: Local development server
+
+tags:
+  - name: Authentication
+    description: User authentication and registration
+  - name: Customers
+    description: Customer account and profile management
+  - name: Restaurants
+    description: Restaurant discovery and browsing
+  - name: Menus
+    description: Restaurant menu management
+  - name: Orders
+    description: Order placement and management
+  - name: Payments
+    description: Payment processing
+  - name: Reviews
+    description: Restaurant reviews and ratings
+  - name: Admin
+    description: Platform administration
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ==================== AUTHENTICATION ====================
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register new user account
+      description: Create a new customer, restaurant owner, or admin account (FR-001, FR-046)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            examples:
+              customer:
+                summary: Customer registration
+                value:
+                  email: customer@example.com
+                  password: SecurePass123!
+                  name: John Doe
+                  phone: "+1234567890"
+                  role: customer
+              restaurant_owner:
+                summary: Restaurant owner registration
+                value:
+                  email: owner@restaurant.com
+                  password: SecurePass123!
+                  name: Jane Smith
+                  phone: "+1234567890"
+                  role: restaurant_owner
+                  business_license_number: "BL123456"
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Authenticate user
+      description: Login with email and password, returns JWT token (FR-002)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          description: Rate limit exceeded (NFR-015 - max 5 failed attempts per 15 min)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/password/reset:
+    post:
+      tags: [Authentication]
+      summary: Request password reset
+      description: Send password reset link to user email (FR-003)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Password reset email sent (always return 200 to prevent email enumeration)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: If the email exists, a password reset link has been sent
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # ==================== CUSTOMERS ====================
+  /customers/me:
+    get:
+      tags: [Customers]
+      summary: Get current customer profile
+      description: Retrieve authenticated customer's profile information (FR-004)
+      responses:
+        '200':
+          description: Customer profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    patch:
+      tags: [Customers]
+      summary: Update customer profile
+      description: Update customer's profile information (FR-004)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCustomerRequest'
+      responses:
+        '200':
+          description: Profile updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /customers/me/orders:
+    get:
+      tags: [Customers]
+      summary: Get customer order history
+      description: Retrieve all orders placed by the customer, sorted by most recent (FR-071, FR-072)
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: status
+          in: query
+          description: Filter by order status
+          schema:
+            type: string
+            enum: [placed, confirmed, preparing, ready, completed, cancelled, no_show]
+      responses:
+        '200':
+          description: Order history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==================== RESTAURANTS ====================
+  /restaurants:
+    get:
+      tags: [Restaurants]
+      summary: Search and browse restaurants
+      description: Get list of restaurants with filtering and sorting (FR-005, FR-006, FR-007)
+      security: []
+      parameters:
+        - name: location
+          in: query
+          description: Search by address, zip code, or coordinates
+          schema:
+            type: string
+          example: "10001"
+        - name: cuisine_type
+          in: query
+          description: Filter by cuisine type
+          schema:
+            type: string
+        - name: min_rating
+          in: query
+          description: Minimum average rating
+          schema:
+            type: number
+            format: float
+            minimum: 0
+            maximum: 5
+        - name: max_distance
+          in: query
+          description: Maximum distance in miles (requires location)
+          schema:
+            type: number
+            format: float
+        - name: sort_by
+          in: query
+          description: Sort order
+          schema:
+            type: string
+            enum: [distance, rating, name]
+            default: distance
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: List of restaurants
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RestaurantListItem'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /restaurants/{restaurantId}:
+    get:
+      tags: [Restaurants]
+      summary: Get restaurant details
+      description: Get full restaurant profile including menu (FR-008)
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RestaurantId'
+      responses:
+        '200':
+          description: Restaurant details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Restaurant'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /restaurants/{restaurantId}/menu:
+    get:
+      tags: [Menus]
+      summary: Get restaurant menu
+      description: Get all menu items organized by category (FR-009)
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RestaurantId'
+      responses:
+        '200':
+          description: Restaurant menu
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  restaurant_id:
+                    type: string
+                    format: uuid
+                  categories:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MenuCategory'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /restaurants/{restaurantId}/pickup-slots:
+    get:
+      tags: [Restaurants]
+      summary: Get available pickup time slots
+      description: Get available pickup times based on restaurant hours and capacity (FR-014, FR-062)
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RestaurantId'
+        - name: date
+          in: query
+          required: true
+          description: Date to check availability (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Available pickup slots
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date:
+                    type: string
+                    format: date
+                  slots:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PickupSlot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /restaurants/{restaurantId}/reviews:
+    get:
+      tags: [Reviews]
+      summary: Get restaurant reviews
+      description: Get recent reviews for a restaurant (FR-069)
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RestaurantId'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Restaurant reviews
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  restaurant_id:
+                    type: string
+                    format: uuid
+                  rating_avg:
+                    type: number
+                    format: float
+                  rating_count:
+                    type: integer
+                  reviews:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Review'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== ORDERS ====================
+  /orders:
+    post:
+      tags: [Orders]
+      summary: Create new order
+      description: Place a new pickup order (FR-010 through FR-017, FR-018, FR-019)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Order created successfully (payment authorized)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          description: Payment authorization failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentError'
+
+  /orders/{orderId}:
+    get:
+      tags: [Orders]
+      summary: Get order details
+      description: Retrieve order details and current status (FR-032)
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Not authorized to view this order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orders/{orderId}/cancel:
+    post:
+      tags: [Orders]
+      summary: Cancel order
+      description: |
+        Cancel an order with automatic refund within 5 minutes (FR-034),
+        or request cancellation requiring restaurant approval after 5 minutes (FR-035, FR-036).
+        Cannot cancel once restaurant has accepted (FR-038).
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Cancellation reason
+                  maxLength: 500
+      responses:
+        '200':
+          description: Cancellation processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [cancelled, cancellation_requested]
+                    description: |
+                      - cancelled: Order cancelled immediately (within 5-min window)
+                      - cancellation_requested: Awaiting restaurant approval (after 5-min window)
+                  message:
+                    type: string
+        '400':
+          description: Cannot cancel (e.g., order already accepted by restaurant)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict (e.g., simultaneous cancellation and acceptance)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /orders/{orderId}/reorder:
+    post:
+      tags: [Orders]
+      summary: Reorder from past order
+      description: Create a new cart with items from a past order (FR-073)
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Cart created with order items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cart_id:
+                    type: string
+                    format: uuid
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CartItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orders/{orderId}/review:
+    post:
+      tags: [Reviews]
+      summary: Submit order review
+      description: Rate and review a completed order (FR-066, FR-067)
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                  description: Star rating (1-5)
+                review_text:
+                  type: string
+                  maxLength: 500
+                  description: Optional review text
+      responses:
+        '201':
+          description: Review submitted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '400':
+          description: Invalid input or order not completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Order already reviewed (FR-070)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /orders/{orderId}/stream:
+    get:
+      tags: [Orders]
+      summary: Stream order status updates
+      description: Server-Sent Events (SSE) endpoint for real-time order status updates (FR-032)
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: SSE stream of order status updates
+          content:
+            text/event-stream:
+              schema:
+                type: object
+                properties:
+                  event:
+                    type: string
+                    enum: [status, message]
+                  data:
+                    type: object
+                    properties:
+                      order_id:
+                        type: string
+                        format: uuid
+                      state:
+                        type: string
+                        enum: [placed, confirmed, preparing, ready, completed, cancelled, no_show]
+                      timestamp:
+                        type: string
+                        format: date-time
+              examples:
+                status_update:
+                  value: |
+                    event: status
+                    data: {"order_id": "123", "state": "confirmed", "timestamp": "2025-11-11T10:00:00Z"}
+
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== RESTAURANT OWNER ENDPOINTS ====================
+  /restaurant-owner/restaurant:
+    get:
+      tags: [Restaurants]
+      summary: Get owner's restaurant profile
+      description: Get restaurant profile for authenticated owner (FR-047)
+      responses:
+        '200':
+          description: Restaurant profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Restaurant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Restaurant not created yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      tags: [Restaurants]
+      summary: Create restaurant profile
+      description: Create restaurant profile for authenticated owner (FR-047)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRestaurantRequest'
+      responses:
+        '201':
+          description: Restaurant created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Restaurant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Restaurant already exists for this owner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    patch:
+      tags: [Restaurants]
+      summary: Update restaurant profile
+      description: Update restaurant profile, hours, or closure dates (FR-048, FR-049)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRestaurantRequest'
+      responses:
+        '200':
+          description: Restaurant updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Restaurant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /restaurant-owner/menu:
+    get:
+      tags: [Menus]
+      summary: Get menu for management
+      description: Get full menu with all items including inactive (FR-050)
+      responses:
+        '200':
+          description: Restaurant menu
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MenuItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Menus]
+      summary: Create menu item
+      description: Add new menu item (FR-051, FR-052)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMenuItemRequest'
+      responses:
+        '201':
+          description: Menu item created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /restaurant-owner/menu/{menuItemId}:
+    patch:
+      tags: [Menus]
+      summary: Update menu item
+      description: Update menu item details, price, or availability (FR-053, FR-054)
+      parameters:
+        - name: menuItemId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMenuItemRequest'
+      responses:
+        '200':
+          description: Menu item updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [Menus]
+      summary: Delete menu item
+      description: Soft delete menu item (set is_active=false)
+      parameters:
+        - name: menuItemId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Menu item deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /restaurant-owner/orders:
+    get:
+      tags: [Orders]
+      summary: Get restaurant orders
+      description: Get all orders for the restaurant, filtered by status (FR-056, FR-057)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [placed, confirmed, preparing, ready, completed, cancelled, no_show]
+        - name: date
+          in: query
+          description: Filter by pickup date (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Restaurant orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /restaurant-owner/orders/{orderId}/accept:
+    post:
+      tags: [Orders]
+      summary: Accept order
+      description: Accept incoming order, triggers payment capture (FR-027, FR-028, FR-058)
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                estimated_ready_time:
+                  type: string
+                  format: date-time
+                  description: When order will be ready for pickup
+      responses:
+        '200':
+          description: Order accepted, payment captured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: Cannot accept (e.g., already accepted, timeout exceeded)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Optimistic lock conflict (FR-030)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /restaurant-owner/orders/{orderId}/reject:
+    post:
+      tags: [Orders]
+      summary: Reject order
+      description: Reject order with reason, triggers automatic refund (FR-027)
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+                  description: Rejection reason (e.g., "Out of ingredients")
+      responses:
+        '200':
+          description: Order rejected, customer refunded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: Cannot reject (e.g., already accepted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /restaurant-owner/orders/{orderId}/update-status:
+    post:
+      tags: [Orders]
+      summary: Update order status
+      description: Update order state (confirmed → preparing → ready → completed) (FR-060, FR-061)
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state, version]
+              properties:
+                state:
+                  type: string
+                  enum: [confirmed, preparing, ready, completed]
+                  description: New order state (must follow state flow)
+                version:
+                  type: integer
+                  description: Current order version for optimistic locking
+      responses:
+        '200':
+          description: Order status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: Invalid state transition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Optimistic lock conflict (version mismatch)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /restaurant-owner/orders/{orderId}/no-show:
+    post:
+      tags: [Orders]
+      summary: Mark order as no-show
+      description: Mark order as no-show after grace period, captures payment (FR-042, FR-043)
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order marked as no-show, payment captured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: Cannot mark as no-show (e.g., within grace period)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /restaurant-owner/analytics:
+    get:
+      tags: [Restaurants]
+      summary: Get restaurant analytics
+      description: Get sales reports and analytics (FR-074, FR-075, FR-076)
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Restaurant analytics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestaurantAnalytics'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /restaurant-owner/analytics/export:
+    get:
+      tags: [Restaurants]
+      summary: Export analytics report
+      description: Export analytics as CSV file (FR-077)
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: CSV report
+          content:
+            text/csv:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==================== ADMIN ENDPOINTS ====================
+  /admin/restaurants/pending:
+    get:
+      tags: [Admin]
+      summary: Get pending restaurant applications
+      description: List restaurants awaiting approval (FR-078)
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Pending applications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Restaurant'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/restaurants/{restaurantId}/approve:
+    post:
+      tags: [Admin]
+      summary: Approve restaurant application
+      description: Approve restaurant to go live on platform (FR-079)
+      parameters:
+        - $ref: '#/components/parameters/RestaurantId'
+      responses:
+        '200':
+          description: Restaurant approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Restaurant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/restaurants/{restaurantId}/reject:
+    post:
+      tags: [Admin]
+      summary: Reject restaurant application
+      description: Reject restaurant application with reason
+      parameters:
+        - $ref: '#/components/parameters/RestaurantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  maxLength: 1000
+      responses:
+        '200':
+          description: Restaurant rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: Search users
+      description: Search and view customer/restaurant accounts (FR-080)
+      parameters:
+        - name: email
+          in: query
+          schema:
+            type: string
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [customer, restaurant_owner, admin]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: User list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/users/{userId}/suspend:
+    post:
+      tags: [Admin]
+      summary: Suspend user account
+      description: Suspend or deactivate user account (FR-081)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  maxLength: 1000
+      responses:
+        '200':
+          description: User suspended
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/analytics:
+    get:
+      tags: [Admin]
+      summary: Get platform-wide analytics
+      description: View platform analytics (total users, restaurants, orders, revenue) (FR-082)
+      parameters:
+        - name: start_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Platform analytics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAnalytics'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/refunds:
+    post:
+      tags: [Admin]
+      summary: Process manual refund
+      description: Process refund for special cases (FR-083)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order_id, amount, reason]
+              properties:
+                order_id:
+                  type: string
+                  format: uuid
+                amount:
+                  type: number
+                  format: decimal
+                  description: Refund amount in dollars
+                reason:
+                  type: string
+                  maxLength: 1000
+      responses:
+        '200':
+          description: Refund processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  refund_id:
+                    type: string
+                  message:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/disputes:
+    get:
+      tags: [Admin]
+      summary: Get customer support disputes
+      description: View and respond to customer disputes (FR-084)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, in_progress, resolved]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Dispute list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Dispute'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+# ==================== COMPONENTS ====================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /auth/login endpoint
+
+  parameters:
+    RestaurantId:
+      name: restaurantId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Restaurant unique identifier
+
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Order unique identifier
+
+  schemas:
+    # ==================== AUTH SCHEMAS ====================
+    RegisterRequest:
+      type: object
+      required: [email, password, name, role]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        password:
+          type: string
+          minLength: 8
+          description: Min 8 chars, mixed case, numbers, special chars
+        name:
+          type: string
+          maxLength: 255
+        phone:
+          type: string
+          maxLength: 20
+        role:
+          type: string
+          enum: [customer, restaurant_owner, admin]
+        business_license_number:
+          type: string
+          description: Required if role=restaurant_owner
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT access token
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [customer, restaurant_owner, admin]
+        email_verified:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    # ==================== CUSTOMER SCHEMAS ====================
+    Customer:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            addresses:
+              type: array
+              items:
+                $ref: '#/components/schemas/Address'
+
+    Address:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        street:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zip_code:
+          type: string
+        is_default:
+          type: boolean
+
+    UpdateCustomerRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        addresses:
+          type: array
+          items:
+            $ref: '#/components/schemas/Address'
+
+    # ==================== RESTAURANT SCHEMAS ====================
+    Restaurant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        owner_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        cuisine_type:
+          type: string
+        address:
+          type: string
+        phone:
+          type: string
+        latitude:
+          type: number
+          format: float
+        longitude:
+          type: number
+          format: float
+        operating_hours:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              open:
+                type: string
+                example: "09:00"
+              close:
+                type: string
+                example: "21:00"
+        special_closures:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              reason:
+                type: string
+        rating_avg:
+          type: number
+          format: float
+        rating_count:
+          type: integer
+        min_preparation_time:
+          type: integer
+          description: Minutes
+        slot_duration:
+          type: integer
+          description: Minutes
+        slot_capacity:
+          type: integer
+        is_active:
+          type: boolean
+        is_approved:
+          type: boolean
+        photos:
+          type: array
+          items:
+            type: string
+            format: uri
+        created_at:
+          type: string
+          format: date-time
+
+    RestaurantListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        cuisine_type:
+          type: string
+        rating_avg:
+          type: number
+          format: float
+        distance:
+          type: number
+          format: float
+          description: Distance in miles
+        min_preparation_time:
+          type: integer
+        thumbnail:
+          type: string
+          format: uri
+
+    CreateRestaurantRequest:
+      type: object
+      required: [name, cuisine_type, address, phone]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        cuisine_type:
+          type: string
+        address:
+          type: string
+        phone:
+          type: string
+        latitude:
+          type: number
+          format: float
+        longitude:
+          type: number
+          format: float
+        operating_hours:
+          type: object
+        min_preparation_time:
+          type: integer
+          default: 30
+        slot_duration:
+          type: integer
+          default: 15
+        slot_capacity:
+          type: integer
+          default: 5
+
+    UpdateRestaurantRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        cuisine_type:
+          type: string
+        phone:
+          type: string
+        operating_hours:
+          type: object
+        special_closures:
+          type: array
+          items:
+            type: object
+        min_preparation_time:
+          type: integer
+        slot_duration:
+          type: integer
+        slot_capacity:
+          type: integer
+
+    # ==================== MENU SCHEMAS ====================
+    MenuItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        restaurant_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+          format: decimal
+          description: Price in dollars
+        category:
+          type: string
+        preparation_time:
+          type: integer
+        image_url:
+          type: string
+          format: uri
+        dietary_info:
+          type: object
+          properties:
+            vegetarian:
+              type: boolean
+            vegan:
+              type: boolean
+            gluten_free:
+              type: boolean
+            allergens:
+              type: array
+              items:
+                type: string
+        availability_status:
+          type: string
+          enum: [available, sold_out, seasonal]
+        customization_options:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomizationOption'
+        is_active:
+          type: boolean
+        display_order:
+          type: integer
+
+    CustomizationOption:
+      type: object
+      properties:
+        name:
+          type: string
+          example: Size
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+                example: Large
+              price_modifier:
+                type: number
+                format: decimal
+                description: Additional cost in dollars
+
+    MenuCategory:
+      type: object
+      properties:
+        category:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MenuItem'
+
+    CreateMenuItemRequest:
+      type: object
+      required: [name, price, category]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+          format: decimal
+        category:
+          type: string
+        preparation_time:
+          type: integer
+        dietary_info:
+          type: object
+        customization_options:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomizationOption'
+
+    UpdateMenuItemRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+          format: decimal
+        category:
+          type: string
+        availability_status:
+          type: string
+          enum: [available, sold_out, seasonal]
+        customization_options:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomizationOption'
+
+    # ==================== ORDER SCHEMAS ====================
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_number:
+          type: string
+        customer_id:
+          type: string
+          format: uuid
+        restaurant_id:
+          type: string
+          format: uuid
+        restaurant:
+          $ref: '#/components/schemas/RestaurantListItem'
+        state:
+          type: string
+          enum: [placed, confirmed, preparing, ready, completed, cancelled, no_show]
+        version:
+          type: integer
+          description: Optimistic locking version
+        pickup_time:
+          type: string
+          format: date-time
+        total_amount:
+          type: number
+          format: decimal
+        subtotal:
+          type: number
+          format: decimal
+        tax_amount:
+          type: number
+          format: decimal
+        service_fee:
+          type: number
+          format: decimal
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        customer_notes:
+          type: string
+        payment:
+          $ref: '#/components/schemas/PaymentInfo'
+        server_received_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    OrderItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        menu_item_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Menu item name (snapshot)
+        quantity:
+          type: integer
+        unit_price:
+          type: number
+          format: decimal
+        customizations:
+          type: object
+          additionalProperties:
+            type: string
+        special_instructions:
+          type: string
+        subtotal:
+          type: number
+          format: decimal
+
+    CreateOrderRequest:
+      type: object
+      required: [restaurant_id, pickup_time, items, payment_method]
+      properties:
+        restaurant_id:
+          type: string
+          format: uuid
+        pickup_time:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            type: object
+            required: [menu_item_id, quantity]
+            properties:
+              menu_item_id:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
+                minimum: 1
+              customizations:
+                type: object
+              special_instructions:
+                type: string
+                maxLength: 500
+        customer_notes:
+          type: string
+          maxLength: 1000
+        payment_method:
+          type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [card, apple_pay, google_pay]
+            token:
+              type: string
+              description: Stripe payment token
+
+    CartItem:
+      type: object
+      properties:
+        menu_item_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        quantity:
+          type: integer
+        unit_price:
+          type: number
+          format: decimal
+        customizations:
+          type: object
+
+    # ==================== PAYMENT SCHEMAS ====================
+    PaymentInfo:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+          format: uuid
+        stripe_payment_intent_id:
+          type: string
+        amount:
+          type: number
+          format: decimal
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [authorized, captured, released, failed]
+        payment_method:
+          type: string
+        authorized_at:
+          type: string
+          format: date-time
+        captured_at:
+          type: string
+          format: date-time
+        released_at:
+          type: string
+          format: date-time
+
+    PaymentError:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: ERR_PAYMENT_FAILED
+            message:
+              type: string
+            payment_error_code:
+              type: string
+              description: Stripe error code
+            decline_code:
+              type: string
+              description: Card decline code
+            correlation_id:
+              type: string
+              format: uuid
+
+    # ==================== PICKUP SLOT SCHEMAS ====================
+    PickupSlot:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        slot_time:
+          type: string
+          format: date-time
+        duration:
+          type: integer
+          description: Minutes
+        available_capacity:
+          type: integer
+        is_available:
+          type: boolean
+
+    # ==================== REVIEW SCHEMAS ====================
+    Review:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        restaurant_id:
+          type: string
+          format: uuid
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        review_text:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ==================== ANALYTICS SCHEMAS ====================
+    RestaurantAnalytics:
+      type: object
+      properties:
+        total_revenue:
+          type: number
+          format: decimal
+        order_count:
+          type: integer
+        average_order_value:
+          type: number
+          format: decimal
+        popular_items:
+          type: array
+          items:
+            type: object
+            properties:
+              menu_item_id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              order_count:
+                type: integer
+        order_volume_by_hour:
+          type: array
+          items:
+            type: object
+            properties:
+              hour:
+                type: integer
+              count:
+                type: integer
+        order_volume_by_day:
+          type: array
+          items:
+            type: object
+            properties:
+              day:
+                type: string
+              count:
+                type: integer
+
+    PlatformAnalytics:
+      type: object
+      properties:
+        total_users:
+          type: integer
+        total_restaurants:
+          type: integer
+        total_orders:
+          type: integer
+        total_revenue:
+          type: number
+          format: decimal
+        active_customers:
+          type: integer
+        customer_growth:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              count:
+                type: integer
+
+    # ==================== DISPUTE SCHEMAS ====================
+    Dispute:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        restaurant_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [open, in_progress, resolved]
+        complaint:
+          type: string
+        restaurant_response:
+          type: string
+        admin_notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+
+    # ==================== COMMON SCHEMAS ====================
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        total_pages:
+          type: integer
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Error code (e.g., ERR_INVALID_REQUEST, ERR_UNAUTHORIZED)
+            message:
+              type: string
+              description: Human-readable error message
+            details:
+              type: object
+              description: Additional error context
+            correlation_id:
+              type: string
+              format: uuid
+              description: Request correlation ID for tracing
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: ERR_INVALID_REQUEST
+              message: Invalid input parameters
+              details:
+                field: email
+                reason: Invalid email format
+              correlation_id: 123e4567-e89b-12d3-a456-426614174000
+
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: ERR_UNAUTHORIZED
+              message: Authentication required
+              correlation_id: 123e4567-e89b-12d3-a456-426614174000
+
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: ERR_FORBIDDEN
+              message: Admin role required
+              correlation_id: 123e4567-e89b-12d3-a456-426614174000
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: ERR_NOT_FOUND
+              message: Resource not found
+              correlation_id: 123e4567-e89b-12d3-a456-426614174000
+
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: ERR_RATE_LIMIT
+              message: Too many requests, please try again later
+              details:
+                retry_after: 900
+              correlation_id: 123e4567-e89b-12d3-a456-426614174000
