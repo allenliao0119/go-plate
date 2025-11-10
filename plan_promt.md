@@ -1,7 +1,7 @@
 ## Technical Context and Implementation Approach
 
   ### Core Technology Stack
-  - **Language/Version**: Go 1.21+
+  - **Language/Version**: Go 1.23+
   - **Web Framework**: Gin (for RESTful API routing and HTTP handling)
   - **ORM**: XORM (for PostgreSQL database operations)
   - **Database**: PostgreSQL 15+ (primary data store)
@@ -120,18 +120,137 @@
   6. Gin middleware best practices for auth, logging, error handling
   7. Database migration strategy with XORM and PostgreSQL
 
-  ### Constitution Principles to Define
-  Before proceeding, we should establish project constitution principles:
-  1. **API-First Design**: OpenAPI/Swagger documentation before implementation
-  2. **Test-Driven Development**: Write tests before implementation (critical for payment flows)
-  3. **Error Handling**: Consistent error response format, proper HTTP status codes
-  4. **Database Transactions**: All multi-step operations must be atomic
-  5. **Code Organization**: Clear separation of concerns (handler -> service -> repository)
-  6. **Documentation**: GoDoc comments for all public functions
-  7. **Dependency Injection**: Use interfaces for testability
+  ### Detailed Project Structure Example
+  ```
+  restaurant-pickup-platform/
+  ├── cmd/
+  │   └── server/
+  │       ├── main.go                    # Application entry point
+  │       └── main_test.go               # Entry point tests (if needed)
+  │
+  ├── internal/                          # Private application code
+  │   ├── models/                        # Domain models
+  │   │   ├── user.go
+  │   │   ├── user_test.go              # ✅ Unit tests co-located
+  │   │   ├── restaurant.go
+  │   │   ├── restaurant_test.go
+  │   │   ├── order.go
+  │   │   ├── order_test.go
+  │   │   ├── menu_item.go
+  │   │   └── menu_item_test.go
+  │   │
+  │   ├── repository/                    # Data access layer
+  │   │   ├── user_repository.go
+  │   │   ├── user_repository_test.go   # ✅ Unit tests with mocks
+  │   │   ├── order_repository.go
+  │   │   ├── order_repository_test.go
+  │   │   ├── restaurant_repository.go
+  │   │   └── restaurant_repository_test.go
+  │   │
+  │   ├── service/                       # Business logic layer
+  │   │   ├── order_service.go
+  │   │   ├── order_service_test.go     # ✅ Unit tests
+  │   │   ├── payment_service.go
+  │   │   ├── payment_service_test.go
+  │   │   ├── notification_service.go
+  │   │   ├── notification_service_test.go
+  │   │   ├── auth_service.go
+  │   │   └── auth_service_test.go
+  │   │
+  │   ├── handler/                       # HTTP handlers (Gin controllers)
+  │   │   ├── order_handler.go
+  │   │   ├── order_handler_test.go     # ✅ Unit tests
+  │   │   ├── restaurant_handler.go
+  │   │   ├── restaurant_handler_test.go
+  │   │   ├── auth_handler.go
+  │   │   └── auth_handler_test.go
+  │   │
+  │   ├── middleware/                    # HTTP middleware
+  │   │   ├── auth.go
+  │   │   ├── auth_test.go              # ✅ Unit tests
+  │   │   ├── rate_limiter.go
+  │   │   ├── rate_limiter_test.go
+  │   │   ├── logger.go
+  │   │   └── error_handler.go
+  │   │
+  │   ├── scheduler/                     # Time-based task scheduler
+  │   │   ├── order_timeout.go          # Auto-reject after 10 minutes
+  │   │   ├── order_timeout_test.go
+  │   │   ├── reminder.go               # Pickup reminders
+  │   │   └── reminder_test.go
+  │   │
+  │   └── testutil/                      # Shared test utilities
+  │       ├── mocks.go                   # Common mocks
+  │       └── fixtures.go                # Test data fixtures
+  │
+  ├── pkg/                               # Public reusable packages
+  │   ├── validator/                     # Input validation utilities
+  │   │   ├── validator.go
+  │   │   └── validator_test.go         # ✅ Unit tests
+  │   │
+  │   └── utils/                         # Common utilities
+  │       ├── time.go
+  │       └── time_test.go
+  │
+  ├── tests/                             # ⚠️ Integration & E2E tests ONLY
+  │   ├── integration/                   # Integration tests
+  │   │   ├── database_test.go          # Database operations with real DB
+  │   │   ├── order_repository_integration_test.go
+  │   │   ├── payment_integration_test.go
+  │   │   └── notification_integration_test.go
+  │   │
+  │   ├── e2e/                           # End-to-end tests
+  │   │   ├── order_flow_test.go        # Complete order flow
+  │   │   ├── cancellation_flow_test.go # Cancellation scenarios
+  │   │   └── pickup_flow_test.go       # Pickup scenarios
+  │   │
+  │   └── testutil/                      # Test utilities for integration/E2E
+  │       ├── db_helpers.go             # Database setup/teardown
+  │       ├── fixtures.go               # Test data for integration tests
+  │       └── docker-compose.test.yml   # Test infrastructure
+  │
+  ├── migrations/                        # Database migrations
+  │   ├── 001_create_users_table.sql
+  │   ├── 002_create_restaurants_table.sql
+  │   ├── 003_create_orders_table.sql
+  │   └── 004_create_menu_items_table.sql
+  │
+  ├── docs/                              # Documentation
+  │   ├── api/
+  │   │   └── openapi.yaml              # OpenAPI 3.0 specification
+  │   └── architecture/
+  │       └── database_schema.md
+  │
+  ├── scripts/                           # Utility scripts
+  │   ├── setup_dev_db.sh               # Setup development database
+  │   └── run_tests.sh                  # Run all tests
+  │
+  ├── go.mod                             # Go module definition
+  ├── go.sum                             # Dependency checksums
+  ├── Makefile                           # Common commands (build, test, migrate)
+  ├── docker-compose.yml                 # Development infrastructure
+  ├── Dockerfile                         # Application container
+  ├── .env.example                       # Environment variables template
+  ├── .gitignore
+  └── README.md
+  ```
 
-  ### Complexity Constraints
-  - Keep business logic separate from HTTP handlers
-  - Use repository pattern for data access abstraction
-  - Avoid premature optimization; start simple and profile before optimizing
-  - Prefer standard library over third-party packages when feasible
+  ### Key Testing Commands
+  ```bash
+  # Run all unit tests (co-located with source code)
+  go test ./internal/... ./pkg/... -v -cover
+
+  # Run integration tests (requires Docker)
+  docker-compose -f tests/testutil/docker-compose.test.yml up -d
+  go test ./tests/integration/... -tags=integration -v
+
+  # Run E2E tests
+  go test ./tests/e2e/... -tags=e2e -v
+
+  # Run all tests with coverage
+  go test ./... -coverprofile=coverage.out
+  go tool cover -html=coverage.out
+
+  # Run tests for specific package
+  go test ./internal/service -v -run TestOrderService
+  ```
